@@ -1,11 +1,11 @@
 #! /usr/bin/env node
 (function() {
-  var Config, Logger, Memcached, argv, close_response, config, express, favicon, handle_request, ip_allowed, logger, memcached, mode, random_worker, request, respawn, serve, spawn, stop, url, workers;
+  var Config, Logger, Memcached, Redis, argv, caching, close_response, config, express, favicon, handle_request, ip_allowed, logger, mode, random_worker, request, respawn, serve, spawn, stop, url, workers;
 
   spawn = function(n) {
-    var i, worker_config, _, _i, _len, _results;
-    _results = [];
-    for (i = _i = 0, _len = workers.length; _i < _len; i = ++_i) {
+    var _, i, j, len, results, worker_config;
+    results = [];
+    for (i = j = 0, len = workers.length; j < len; i = ++j) {
       _ = workers[i];
       workers[i] = {
         process: null,
@@ -20,9 +20,9 @@
       });
       workers[i].process.start();
       config.worker.port += 1;
-      _results.push(logger.info("phear", "Worker " + (i + 1) + " of " + n + " started."));
+      results.push(logger.info("phear", "Worker " + (i + 1) + " of " + n + " started."));
     }
-    return _results;
+    return results;
   };
 
   serve = function(port) {
@@ -64,7 +64,7 @@
       cache_namespace = req.query.cache_namespace;
     }
     cache_key = "" + cache_namespace + req.query.fetch_url;
-    return memcached.get(cache_key, function(error, data) {
+    return caching.get(cache_key, function(error, data) {
       var headers, worker, worker_request_url;
       if ((error != null) || (data == null) || req.query.force in ["true", "1"]) {
         worker = random_worker();
@@ -91,7 +91,7 @@
           }
         }, function(error, response, body) {
           if (response.statusCode === 200) {
-            memcached.set(cache_key, body, config.cache_ttl, function() {
+            caching.set(cache_key, body, config.cache_ttl, function() {
               return logger.info("phear", "Stored " + req.query.fetch_url + " in cache");
             });
           }
@@ -105,8 +105,8 @@
   };
 
   random_worker = function() {
-    var worker, _ref;
-    while ((worker != null ? (_ref = worker.process) != null ? _ref.status : void 0 : void 0) !== "running") {
+    var ref, worker;
+    while ((worker != null ? (ref = worker.process) != null ? ref.status : void 0 : void 0) !== "running") {
       worker = workers[Math.floor(Math.random() * workers.length)];
     }
     return worker;
@@ -130,10 +130,10 @@
   };
 
   stop = function() {
-    var worker, _i, _len;
+    var j, len, worker;
     logger.info("phear", "Kill process and workers.");
-    for (_i = 0, _len = workers.length; _i < _len; _i++) {
-      worker = workers[_i];
+    for (j = 0, len = workers.length; j < len; j++) {
+      worker = workers[j];
       worker.process.stop();
     }
     return process.kill();
@@ -148,6 +148,8 @@
   url = require('url');
 
   Memcached = require('memcached');
+
+  Redis = require('redis');
 
   favicon = require('serve-favicon');
 
@@ -170,16 +172,27 @@
 
   workers = new Array(config.workers);
 
-  memcached = new Memcached(config.memcached.servers, config.memcached.options);
+  caching = void 0;
 
-  memcached.on('issue', function(f) {
-    logger.info("phear", "Memcache failed: " + f.messages);
-    return stop();
-  });
+  if (config.memcached != null) {
+    caching = new Memcached(config.memcached.servers, config.memcached.options);
+    caching.on('issue', function(f) {
+      logger.info("phear", "Memcache failed: " + f.messages);
+      return stop();
+    });
+    caching.stats(function(_) {
+      return true;
+    });
+  }
 
-  memcached.stats(function(_) {
-    return true;
-  });
+  if (config.redis != null) {
+    caching = Redis.createClient(config.redis.port, config.redis.host);
+  }
+
+  if (caching === (void 0 != null)) {
+    logger.error("phear", "NO CACHING SERVERS (memcached|redis) DEFINED");
+    stop();
+  }
 
   process.on('uncaughtException', function(err) {
     logger.info("phear", "UNCAUGHT ERROR: " + err.stack);

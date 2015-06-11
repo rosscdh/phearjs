@@ -1,7 +1,7 @@
 #
 # Phear.js
 # -------------
-# This is the main PhearJS process. It serves and controls the PhantomJS workers.  
+# This is the main PhearJS process. It serves and controls the PhantomJS workers.
 #
 # For setup info see INSTALLATION.md
 # For usage info see README.md
@@ -12,14 +12,14 @@ spawn = (n) ->
   for _, i in workers
     workers[i] = {process: null, port: config.worker.port}
     worker_config = JSON.stringify(config.worker)
-    
+
     # Create worker object
     workers[i].process = respawn(["phantomjs",
-                                  "--load-images=no", 
-                                  "--disk-cache=no", 
-                                  "--ignore-ssl-errors=yes", 
+                                  "--load-images=no",
+                                  "--disk-cache=no",
+                                  "--ignore-ssl-errors=yes",
                                   "--ssl-protocol=any",
-                                  "lib/worker.js", 
+                                  "lib/worker.js",
                                   "--config=#{worker_config}"], {
       cwd: '.',
       sleep:1000,
@@ -37,7 +37,7 @@ spawn = (n) ->
 serve = (port) ->
   app = express()
   app.use(favicon("assets/favicon.png")) # Favicons are important.
-  
+
   app.get '/', (req, res) ->
     handle_request(req, res)
 
@@ -52,7 +52,7 @@ handle_request = (req, res) ->
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept")
 
   # In all environments except development, check the IPs and only allow pre-defined addresses.
-  # We do this both here and in the worker to prevent not-allowed IPs to bypass this and make  
+  # We do this both here and in the worker to prevent not-allowed IPs to bypass this and make
   # requests directly to the worker.
   if mode != "development" and not ip_allowed(req.headers["real-ip"])
     res.statusCode = 403
@@ -62,7 +62,7 @@ handle_request = (req, res) ->
   if not req.query.fetch_url?
     res.statusCode = 400
     return close_response("phear", "No URL requested, you have to set fetch_url=encoded_url.", res)
-  
+
   # Response with JSON/raw results
   respond = (statusCode, body) ->
     if req.query.raw of ["true", "1"]
@@ -71,23 +71,23 @@ handle_request = (req, res) ->
     else
       res.set "content-type", "application/json"
       res.status(statusCode).send(body)
-    
+
     res.end()
-  
+
   cache_namespace = "global-"
-  
+
   if req.query.cache_namespace?
     cache_namespace = req.query.cache_namespace
 
   cache_key = "#{cache_namespace}#{req.query.fetch_url}"
-  
+
   # Where the magic happens.
-  memcached.get cache_key, (error, data) ->
-    
+  caching.get cache_key, (error, data) ->
+
     # Check if we can and should fetch, or serve from cache
     if error? or not data? or req.query.force of ["true", "1"]
       worker = random_worker()
-      
+
       headers = {}
 
       # Optionally add some headers to the request
@@ -97,7 +97,7 @@ handle_request = (req, res) ->
         catch
           res.statusCode = 400
           return close_response("phear", "Additional headers not properly formatted, e.g.: encodeURIComponent('{extra: \"Yes.\"}').", res)
-      
+
       # Make the URL for the worker
       worker_request_url = url.format {
         protocol: "http"
@@ -110,7 +110,7 @@ handle_request = (req, res) ->
       # Make the request to the worker and store in cache if status is 200 (don't store bad requests)
       request {url: worker_request_url, headers: {'real-ip': req.headers['real-ip']}}, (error, response, body) ->
         if response.statusCode == 200
-          memcached.set cache_key, body, config.cache_ttl, ->
+          caching.set cache_key, body, config.cache_ttl, ->
             logger.info "phear", "Stored #{req.query.fetch_url} in cache"
 
         # Return to requester!
@@ -128,7 +128,7 @@ random_worker = ->
 # Prettily close a response
 close_response = (inst, status, response) ->
   response.set "content-type", "application/json"
-  
+
   logger.info inst, "Ending process."
   if [400, 403, 500].indexOf(response.statusCode) > -1
     response.status(response.statusCode).send JSON.stringify(
@@ -143,7 +143,7 @@ ip_allowed = (ip) ->
 
 stop = ->
   logger.info "phear", "Kill process and workers."
-  
+
   # Send stop signal to all workers.
   for worker in workers
     worker.process.stop()
@@ -159,6 +159,7 @@ respawn = require('respawn')
 request = require('request')
 url = require('url')
 Memcached = require('memcached')
+Redis = require('redis')
 favicon = require('serve-favicon')
 
 argv = require('yargs')
@@ -184,15 +185,30 @@ config.worker.environment = mode
 # Instantiate stuff
 logger = new Logger(config, config.base_port)
 workers = new Array(config.workers)
-memcached = new Memcached(config.memcached.servers, config.memcached.options)
 
-# Make sure workers die on memcached errors.
-memcached.on 'issue', (f) ->
-  logger.info "phear", "Memcache failed: #{f.messages}"
+#
+# Setup Caching servers
+#
+caching = undefined
+
+if config.memcached?
+  # Check we have memcache configed if we do, use it
+  caching = new Memcached(config.memcached.servers, config.memcached.options)
+
+  # Make sure workers die on memcached errors.
+  caching.on 'issue', (f) ->
+    logger.info "phear", "Memcache failed: #{f.messages}"
+    stop()
+
+  # Just check that Memcache is running by looking at stats, before promising you nice stuff.
+  caching.stats((_)->true)
+
+if config.redis?
+  caching = Redis.createClient(config.redis.port, config.redis.host);
+
+if caching == undefined?
+  logger.error "phear", "NO CACHING SERVERS (memcached|redis) DEFINED"
   stop()
-
-# Just check that Memcache is running by looking at stats, before promising you nice stuff.
-memcached.stats((_)->true)
 
 # Make sure that when the process is stopped due to an exception
 # the PhantomJS processes also stop.
@@ -207,7 +223,7 @@ logger.info "phear", "Config file: #{argv.c}"
 logger.info "phear", "Port: #{config.base_port}"
 logger.info "phear", "Workers: #{config.workers}"
 logger.info "phear", "=================================="
-  
+
 # Actually start the service!
 spawn(config.workers)
 serve(config.base_port)
