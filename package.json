@@ -5,6 +5,7 @@
   "dependencies": {
     "express": "latest",
     "memcached": "latest",
+    "redis": "latest",
     "querystring": "latest",
     "request": "latest",
     "respawn": "latest",
