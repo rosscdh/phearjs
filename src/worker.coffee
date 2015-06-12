@@ -7,13 +7,11 @@
 
 # go! go! go!
 run_server = ->
-
   # Create the server
   server = webserver.create()
 
   # Listen for requests!
   service = server.listen config.port, (request, response) ->
-
     # Count the number of spawned page instances
     this_inst = next_instance_number()
     this_inst = "worker:p-#{this_inst}"
@@ -89,7 +87,7 @@ fetch_url = (url, response, this_inst, parse_delay, request_headers) ->
     logger.info this_inst, "Redirected to #{targetUrl}"
     final_url = targetUrl
 
-  # Remember the headers at the end of the request. For everything that is 
+  # Remember the headers at the end of the request. For everything that is
   # received this callback is triggered, so only store if the URL is final.
   page_inst.onResourceReceived = (response) ->
     decoded_url = decodeURIComponent(response.url)
@@ -123,7 +121,6 @@ fetch_url = (url, response, this_inst, parse_delay, request_headers) ->
 
   # Create an instance of PhantomJS's webpage (the actual fetching and parsing happens here)
   page_inst.open url, (status) ->
-
     # Prevent double execution
     if done then return true else done = true
 

@@ -9,13 +9,14 @@
 
 # Spawn n PhantomJS processes
 spawn = (n) ->
+  worker_config = JSON.stringify(config.worker)
+
   for _, i in workers
     workers[i] = {process: null, port: config.worker.port}
-    worker_config = JSON.stringify(config.worker)
 
     # Create worker object
     workers[i].process = respawn(["phantomjs",
-                                  "--load-images=no",
+                                  "--load-images=yes",
                                   "--disk-cache=no",
                                   "--ignore-ssl-errors=yes",
                                   "--ssl-protocol=any",
@@ -92,7 +93,7 @@ handle_request = (req, res) ->
 
       # Optionally add some headers to the request
       if req.query.headers?
-        try 
+        try
           headers = JSON.parse(req.query.headers)
         catch
           res.statusCode = 400
@@ -108,10 +109,11 @@ handle_request = (req, res) ->
       }
 
       # Make the request to the worker and store in cache if status is 200 (don't store bad requests)
+      logger.info "phear", "Worker url #{worker_request_url}"
       request {url: worker_request_url, headers: {'real-ip': req.headers['real-ip']}}, (error, response, body) ->
         if response.statusCode == 200
           caching.set cache_key, body, config.cache_ttl, ->
-            logger.info "phear", "Stored #{req.query.fetch_url} in cache"
+            logger.info "phear", "Stored #{req.query.fetch_url} in cache for #{config.cache_ttl}"
 
         # Return to requester!
         respond(response.statusCode, body)

@@ -4,6 +4,7 @@
 
   spawn = function(n) {
     var _, i, j, len, results, worker_config;
+    worker_config = JSON.stringify(config.worker);
     results = [];
     for (i = j = 0, len = workers.length; j < len; i = ++j) {
       _ = workers[i];
@@ -11,8 +12,7 @@
         process: null,
         port: config.worker.port
       };
-      worker_config = JSON.stringify(config.worker);
-      workers[i].process = respawn(["phantomjs", "--load-images=no", "--disk-cache=no", "--ignore-ssl-errors=yes", "--ssl-protocol=any", "lib/worker.js", "--config=" + worker_config], {
+      workers[i].process = respawn(["phantomjs", "--load-images=yes", "--disk-cache=no", "--ignore-ssl-errors=yes", "--ssl-protocol=any", "lib/worker.js", "--config=" + worker_config], {
         cwd: '.',
         sleep: 1000,
         stdio: [0, 1, 2],
@@ -84,6 +84,7 @@
           query: req.query,
           headers: headers
         });
+        logger.info("phear", "Worker url " + worker_request_url);
         return request({
           url: worker_request_url,
           headers: {
@@ -92,7 +93,7 @@
         }, function(error, response, body) {
           if (response.statusCode === 200) {
             caching.set(cache_key, body, config.cache_ttl, function() {
-              return logger.info("phear", "Stored " + req.query.fetch_url + " in cache");
+              return logger.info("phear", "Stored " + req.query.fetch_url + " in cache for " + config.cache_ttl);
             });
           }
           return respond(response.statusCode, body);
