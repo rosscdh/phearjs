@@ -79,6 +79,9 @@ fetch_url = (url, response, this_inst, parse_delay, request_headers) ->
   page_inst.settings.userAgent = config.user_agent
   page_inst.settings.resourceTimeout = config.timeout
   page_inst.customHeaders = request_headers
+  page_inst.viewportSize =
+    width: 1920
+    height: 1080
 
   # Create page instance callbacks
 
@@ -110,6 +113,11 @@ fetch_url = (url, response, this_inst, parse_delay, request_headers) ->
         return close_response this_inst, "Failed to fetch this URL: #{msg.errorString}", response
     else
       logger.info this_inst, "ResourceError on #{url}: #{msg.errorString}"
+
+  page.onError = (msg, trace) ->
+    logger.error this_inst, msg
+    trace.forEach (item) ->
+      logger.error this_inst, "  ", item.file, ":", item.line
 
   page_inst.onError = (msg, trace) ->
     if msg.url?
@@ -143,6 +151,7 @@ fetch_url = (url, response, this_inst, parse_delay, request_headers) ->
 
       response.setHeader "content-type", "application/json"
 
+
       # The page was requested, now we give PhantomJS parse_delay milliseconds to evaluate the page
       page_inst.parse_wait = setTimeout (->
         response.write JSON.stringify(
@@ -153,6 +162,7 @@ fetch_url = (url, response, this_inst, parse_delay, request_headers) ->
           response_headers: fetch_url_headers
           had_js_errors: had_js_errors
           content: strip_scripts(page_inst.content)
+          capture: page_inst.renderBase64('PNG')
         )
         close_response this_inst, status, response
         page_inst.close()
@@ -173,6 +183,11 @@ close_response = (inst, status, response) ->
 # Remove script tags from the page
 strip_scripts = (doc) ->
   doc.replace(/<script(?:.*?)>(?:[\S\s]*?)<\/script>/gi, "")
+
+base64Image = (fs, src) ->
+  data = fs.readFileSync(src)
+  data = data.toString("base64")
+  util.format "data:%s;base64,%s", mime.lookup(src), data
 
 # Count the number of spawned PhantomJS page instances
 next_instance_number = ->
@@ -198,6 +213,9 @@ page = require("webpage")
 webserver = require("webserver")
 system = require("system")
 url = require("url")
+fs = require("fs")
+mime = require("mime")
+util = require("util")
 
 # My libs
 Logger = require("./logger.js")
@@ -205,6 +223,7 @@ Logger = require("./logger.js")
 # Parse config & start logger
 config = parse_config()
 logger = new Logger(config, config.port)
+
 
 # Ssshhhh
 mommy = this
